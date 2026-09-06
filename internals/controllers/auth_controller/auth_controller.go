@@ -11,16 +11,19 @@ import (
 	jwtservice "github.com/smil-thakur/save-the-link/internals/jwt_service"
 	"github.com/smil-thakur/save-the-link/internals/models"
 	authservice "github.com/smil-thakur/save-the-link/internals/services/auth_service"
+	pageservice "github.com/smil-thakur/save-the-link/internals/services/page_service"
 )
 
 type AuthController struct {
 	authService *authservice.AuthService
+	pageService *pageservice.PageService
 	jwtService  *jwtservice.JWTService
 }
 
-func NewAuthController(authService *authservice.AuthService, jwtService *jwtservice.JWTService) *AuthController {
+func NewAuthController(authService *authservice.AuthService, pageService *pageservice.PageService, jwtService *jwtservice.JWTService) *AuthController {
 	return &AuthController{
 		authService: authService,
+		pageService: pageService,
 		jwtService:  jwtService,
 	}
 }
@@ -53,6 +56,16 @@ func (a *AuthController) RegisterUser(ctx *gin.Context, username string, passwor
 	return &user
 }
 
+func (a *AuthController) LogoutUser(ctx *gin.Context) {
+	// SameSite=None (requires Secure) so the browser still sends/clears these
+	// cookies when the frontend is hosted on a different domain than the API.
+	ctx.SetSameSite(http.SameSiteNoneMode)
+	ctx.SetCookie("access_token", "", -1, "/", "", true, true)
+	ctx.SetCookie("refresh_token", "", -1, "/", "", true, true)
+
+	ctx.Status(http.StatusNoContent)
+}
+
 func (a *AuthController) Me(ctx *gin.Context) {
 	userId, ok := ctx.Get("userId")
 
@@ -78,14 +91,40 @@ func (a *AuthController) Me(ctx *gin.Context) {
 	})
 }
 
+func (a *AuthController) DeleteAccount(ctx *gin.Context) {
+	userId := ctx.MustGet("userId").(string)
+
+	if err := a.pageService.DeleteAllPagesForOwner(userId); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"message": fmt.Sprintf("%v", err),
+		})
+		return
+	}
+
+	if err := a.authService.DeleteAccount(userId); err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"message": fmt.Sprintf("%v", err),
+		})
+		return
+	}
+
+	ctx.SetSameSite(http.SameSiteNoneMode)
+	ctx.SetCookie("access_token", "", -1, "/", "", true, true)
+	ctx.SetCookie("refresh_token", "", -1, "/", "", true, true)
+
+	ctx.Status(http.StatusNoContent)
+}
+
 func (a *AuthController) LoginUser(ctx *gin.Context, email string, password string) *dto.LoginUserResponseDTO {
 
 	user, err := a.authService.LoginUser(email, password)
 
 	if err != nil {
 		if errors.Is(err, customerrors.ErrorUserNotFound) || errors.Is(err, customerrors.InvalidCredentials) {
+			// Deliberately the same message for both cases so a failed login can't be
+			// used to enumerate which emails have an account.
 			ctx.IndentedJSON(http.StatusUnauthorized, gin.H{
-				"message": fmt.Sprintf("%v", err),
+				"message": "Invalid email or password",
 			})
 			return nil
 		}
@@ -105,6 +144,7 @@ func (a *AuthController) LoginUser(ctx *gin.Context, email string, password stri
 		return nil
 	}
 
+	ctx.SetSameSite(http.SameSiteNoneMode)
 	ctx.SetCookie(
 		"access_token",
 		token,

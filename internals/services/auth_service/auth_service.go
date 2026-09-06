@@ -46,3 +46,7 @@ func (s *AuthService) LoginUser(email string, password string) (*mongomodels.Use
 	return user, nil
 
 }
+
+func (s *AuthService) DeleteAccount(userId string) error {
+	return s.userRepository.DeleteUser(userId)
+}

@@ -41,4 +41,5 @@ func AuthRoutes(r *gin.Engine, authController *authcontroller.AuthController) {
 		authController.LoginUser(ctx, loginUserDto.Email, loginUserDto.Password)
 
 	})
+	r.POST("/logout", authController.LogoutUser)
 }

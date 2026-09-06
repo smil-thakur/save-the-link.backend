@@ -107,6 +107,7 @@ func AuthMiddleWare(jwtservice *jwtservice.JWTService) gin.HandlerFunc {
 			})
 		}
 
+		ctx.SetSameSite(http.SameSiteNoneMode)
 		ctx.SetCookie(
 			"access_token",
 			newAccessToken,

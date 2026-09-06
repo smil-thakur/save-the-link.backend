@@ -63,6 +63,20 @@ func (u *UserRepository) FindUserById(id string) (*mongomodels.UserMongo, error)
 	return &user, nil
 }
 
+func (u *UserRepository) DeleteUser(id string) error {
+	collection := u.client.Database("Auth").Collection("User")
+
+	objectId, err := bson.ObjectIDFromHex(id)
+
+	if err != nil {
+		return customerrors.ErrorUserNotFound
+	}
+
+	_, err = collection.DeleteOne(u.ctx, bson.M{"_id": objectId})
+
+	return err
+}
+
 func (u *UserRepository) LoginUser(email string, password string) (*mongomodels.UserMongo, error) {
 	collection := u.client.Database("Auth").Collection("User")
 
