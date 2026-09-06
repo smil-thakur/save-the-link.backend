@@ -105,9 +105,10 @@ func AuthMiddleWare(jwtservice *jwtservice.JWTService) gin.HandlerFunc {
 			ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 				"message": fmt.Sprintf("Unable to create new Refresh token %v", err),
 			})
+			return
 		}
 
-		ctx.SetSameSite(http.SameSiteNoneMode)
+		ctx.SetSameSite(http.SameSiteLaxMode)
 		ctx.SetCookie(
 			"access_token",
 			newAccessToken,

@@ -57,9 +57,7 @@ func (a *AuthController) RegisterUser(ctx *gin.Context, username string, passwor
 }
 
 func (a *AuthController) LogoutUser(ctx *gin.Context) {
-	// SameSite=None (requires Secure) so the browser still sends/clears these
-	// cookies when the frontend is hosted on a different domain than the API.
-	ctx.SetSameSite(http.SameSiteNoneMode)
+	ctx.SetSameSite(http.SameSiteLaxMode)
 	ctx.SetCookie("access_token", "", -1, "/", "", true, true)
 	ctx.SetCookie("refresh_token", "", -1, "/", "", true, true)
 
@@ -108,7 +106,7 @@ func (a *AuthController) DeleteAccount(ctx *gin.Context) {
 		return
 	}
 
-	ctx.SetSameSite(http.SameSiteNoneMode)
+	ctx.SetSameSite(http.SameSiteLaxMode)
 	ctx.SetCookie("access_token", "", -1, "/", "", true, true)
 	ctx.SetCookie("refresh_token", "", -1, "/", "", true, true)
 
@@ -135,8 +133,6 @@ func (a *AuthController) LoginUser(ctx *gin.Context, email string, password stri
 	}
 
 	token, err := a.jwtService.CreateToken(user.Id.Hex())
-	refresh_token, err := a.jwtService.CreateRefreshToken(user.Id.Hex())
-
 	if err != nil {
 		ctx.IndentedJSON(http.StatusInternalServerError, gin.H{
 			"message": fmt.Sprintf("%v", err),
@@ -144,7 +140,15 @@ func (a *AuthController) LoginUser(ctx *gin.Context, email string, password stri
 		return nil
 	}
 
-	ctx.SetSameSite(http.SameSiteNoneMode)
+	refreshToken, err := a.jwtService.CreateRefreshToken(user.Id.Hex())
+	if err != nil {
+		ctx.IndentedJSON(http.StatusInternalServerError, gin.H{
+			"message": fmt.Sprintf("%v", err),
+		})
+		return nil
+	}
+
+	ctx.SetSameSite(http.SameSiteLaxMode)
 	ctx.SetCookie(
 		"access_token",
 		token,
@@ -157,7 +161,7 @@ func (a *AuthController) LoginUser(ctx *gin.Context, email string, password stri
 
 	ctx.SetCookie(
 		"refresh_token",
-		refresh_token,
+		refreshToken,
 		604800,
 		"/",
 		"",
