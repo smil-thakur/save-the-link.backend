@@ -218,6 +218,48 @@ func (s *PageService) SetCollaborators(id string, ownerId string, emails []strin
 	return page, notFound, nil
 }
 
+// Bookmark lets an authenticated user save a public page they don't own for
+// quick access from the sidebar. Rejected for a page's own owner — they
+// already have it in their page tree, and bookmarking it would just be
+// clutter and a duplicate entry point to the same page.
+func (s *PageService) Bookmark(pageId string, userId string) error {
+	page, err := s.pageRepository.GetPageByIdUnscoped(pageId)
+
+	if err != nil {
+		return err
+	}
+
+	if page.Visibility != "public" {
+		return customerrors.ErrorForbidden
+	}
+
+	userObjectId, err := bson.ObjectIDFromHex(userId)
+
+	if err != nil {
+		return customerrors.ErrorUserNotFound
+	}
+
+	if page.OwnerId == userObjectId {
+		return customerrors.ErrorCannotBookmarkOwnPage
+	}
+
+	return s.userRepository.AddBookmark(userId, pageId)
+}
+
+func (s *PageService) Unbookmark(pageId string, userId string) error {
+	return s.userRepository.RemoveBookmark(userId, pageId)
+}
+
+func (s *PageService) ListBookmarks(userId string) ([]repository.PublicPageSummary, error) {
+	user, err := s.userRepository.FindUserById(userId)
+
+	if err != nil {
+		return nil, err
+	}
+
+	return s.pageRepository.GetPageSummariesByIds(user.BookmarkedPageIds)
+}
+
 func generateSlug() (string, error) {
 	buf := make([]byte, 6)
 

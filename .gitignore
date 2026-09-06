@@ -1,3 +1,4 @@
 .env
 /tmp
 /cmd/seed/
+backfill_block_metadata/

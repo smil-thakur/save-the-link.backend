@@ -42,6 +42,7 @@ type SetCollaboratorsResponseDTO struct {
 }
 
 type PublicPageSummaryDTO struct {
+	Id        string  `json:"id"`
 	Title     string  `json:"title"`
 	Icon      *string `json:"icon,omitempty"`
 	Slug      string  `json:"slug"`

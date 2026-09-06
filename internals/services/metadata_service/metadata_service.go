@@ -2,6 +2,7 @@ package metadataservice
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"net"
@@ -87,12 +88,83 @@ func validateURL(raw string) (*url.URL, error) {
 	return parsed, nil
 }
 
-func FetchMetadata(ctx context.Context, rawURL string) (*Metadata, error) {
-	parsed, err := validateURL(rawURL)
+// oEmbedProviders maps well-known video hosts to their oEmbed endpoint. These
+// sites are frequently served through consent walls, bot-detection
+// interstitials, or region-dependent experiments that replace a specific
+// video's real Open Graph tags with generic site-wide ones (title "YouTube",
+// the company's own description, the site favicon instead of the video
+// thumbnail) — the exact symptom this fixes. Their oEmbed endpoint is a
+// stable, dedicated JSON API that isn't subject to that variability, so it's
+// consulted directly by host rather than discovered from the (possibly
+// generic) scraped page.
+var oEmbedProviders = []struct {
+	hosts    []string
+	endpoint func(rawURL string) string
+}{
+	{
+		hosts: []string{"youtube.com", "www.youtube.com", "m.youtube.com", "music.youtube.com", "youtu.be"},
+		endpoint: func(rawURL string) string {
+			return "https://www.youtube.com/oembed?format=json&url=" + url.QueryEscape(rawURL)
+		},
+	},
+	{
+		hosts: []string{"vimeo.com", "www.vimeo.com"},
+		endpoint: func(rawURL string) string {
+			return "https://vimeo.com/api/oembed.json?url=" + url.QueryEscape(rawURL)
+		},
+	},
+}
+
+func findOEmbedEndpoint(rawURL string, host string) (string, bool) {
+	host = strings.ToLower(host)
+
+	for _, provider := range oEmbedProviders {
+		for _, candidate := range provider.hosts {
+			if host == candidate {
+				return provider.endpoint(rawURL), true
+			}
+		}
+	}
+
+	return "", false
+}
+
+type oEmbedResult struct {
+	Title        string `json:"title"`
+	ThumbnailURL string `json:"thumbnail_url"`
+	ProviderName string `json:"provider_name"`
+}
+
+func fetchOEmbed(ctx context.Context, endpoint string) (*oEmbedResult, error) {
+	reqCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
+	defer cancel()
+
+	req, err := http.NewRequestWithContext(reqCtx, http.MethodGet, endpoint, nil)
 	if err != nil {
 		return nil, err
 	}
+	req.Header.Set("User-Agent", "Mozilla/5.0 (compatible; SaveTheLinkBot/1.0)")
+	req.Header.Set("Accept", "application/json")
 
+	resp, err := newSafeClient().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode >= 400 {
+		return nil, errors.New("oEmbed request failed")
+	}
+
+	var result oEmbedResult
+	if err := json.NewDecoder(io.LimitReader(resp.Body, maxBodyBytes)).Decode(&result); err != nil {
+		return nil, err
+	}
+
+	return &result, nil
+}
+
+func scrapeMetadata(ctx context.Context, parsed *url.URL) (*Metadata, error) {
 	reqCtx, cancel := context.WithTimeout(ctx, fetchTimeout)
 	defer cancel()
 
@@ -119,6 +191,39 @@ func FetchMetadata(ctx context.Context, rawURL string) (*Metadata, error) {
 	}
 
 	return extractMetadata(doc, resp.Request.URL), nil
+}
+
+func FetchMetadata(ctx context.Context, rawURL string) (*Metadata, error) {
+	parsed, err := validateURL(rawURL)
+	if err != nil {
+		return nil, err
+	}
+
+	meta, scrapeErr := scrapeMetadata(ctx, parsed)
+
+	if endpoint, ok := findOEmbedEndpoint(rawURL, parsed.Hostname()); ok {
+		if oEmbed, err := fetchOEmbed(ctx, endpoint); err == nil {
+			if meta == nil {
+				meta = &Metadata{}
+			}
+			if oEmbed.Title != "" {
+				meta.Title = oEmbed.Title
+			}
+			if oEmbed.ThumbnailURL != "" {
+				meta.Image = oEmbed.ThumbnailURL
+			}
+			if oEmbed.ProviderName != "" {
+				meta.SiteName = oEmbed.ProviderName
+			}
+			return meta, nil
+		}
+	}
+
+	if scrapeErr != nil {
+		return nil, scrapeErr
+	}
+
+	return meta, nil
 }
 
 func extractMetadata(doc *html.Node, base *url.URL) *Metadata {

@@ -63,6 +63,8 @@ func (c *PageController) respondWithError(ctx *gin.Context, err error) {
 		ctx.AbortWithStatusJSON(http.StatusForbidden, gin.H{"message": err.Error()})
 	case errors.Is(err, customerrors.ErrorInvalidPage):
 		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"message": err.Error()})
+	case errors.Is(err, customerrors.ErrorCannotBookmarkOwnPage):
+		ctx.AbortWithStatusJSON(http.StatusBadRequest, gin.H{"message": err.Error()})
 	default:
 		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
 			"message": fmt.Sprintf("%v", err),
@@ -290,6 +292,56 @@ func (c *PageController) ListPublicPages(ctx *gin.Context) {
 
 	for i, summary := range summaries {
 		response[i] = dto.PublicPageSummaryDTO{
+			Id:        summary.Id.Hex(),
+			Title:     summary.Title,
+			Icon:      summary.Icon,
+			Slug:      summary.Slug,
+			LinkCount: summary.LinkCount,
+		}
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}
+
+func (c *PageController) BookmarkPage(ctx *gin.Context) {
+	userId := ctx.MustGet("userId").(string)
+	id := ctx.Param("id")
+
+	if err := c.pageService.Bookmark(id, userId); err != nil {
+		c.respondWithError(ctx, err)
+		return
+	}
+
+	ctx.Status(http.StatusNoContent)
+}
+
+func (c *PageController) UnbookmarkPage(ctx *gin.Context) {
+	userId := ctx.MustGet("userId").(string)
+	id := ctx.Param("id")
+
+	if err := c.pageService.Unbookmark(id, userId); err != nil {
+		c.respondWithError(ctx, err)
+		return
+	}
+
+	ctx.Status(http.StatusNoContent)
+}
+
+func (c *PageController) ListBookmarks(ctx *gin.Context) {
+	userId := ctx.MustGet("userId").(string)
+
+	summaries, err := c.pageService.ListBookmarks(userId)
+
+	if err != nil {
+		c.respondWithError(ctx, err)
+		return
+	}
+
+	response := make([]dto.PublicPageSummaryDTO, len(summaries))
+
+	for i, summary := range summaries {
+		response[i] = dto.PublicPageSummaryDTO{
+			Id:        summary.Id.Hex(),
 			Title:     summary.Title,
 			Icon:      summary.Icon,
 			Slug:      summary.Slug,

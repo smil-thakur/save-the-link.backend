@@ -109,6 +109,54 @@ func (u *UserRepository) SearchUsersByEmail(query string, excludeUserId string, 
 	return users, nil
 }
 
+// AddBookmark adds a page id to the user's bookmark list. A no-op if it's
+// already there ($addToSet), so bookmarking twice can't create duplicates.
+func (u *UserRepository) AddBookmark(userId string, pageId string) error {
+	collection := u.client.Database("Auth").Collection("User")
+
+	userObjectId, err := bson.ObjectIDFromHex(userId)
+	if err != nil {
+		return customerrors.ErrorUserNotFound
+	}
+
+	pageObjectId, err := bson.ObjectIDFromHex(pageId)
+	if err != nil {
+		return customerrors.ErrorPageNotFound
+	}
+
+	_, err = collection.UpdateOne(
+		u.ctx,
+		bson.M{"_id": userObjectId},
+		bson.M{"$addToSet": bson.M{"bookmarkedPageIds": pageObjectId}},
+	)
+
+	return err
+}
+
+// RemoveBookmark removes a page id from the user's bookmark list. A no-op if
+// it isn't there.
+func (u *UserRepository) RemoveBookmark(userId string, pageId string) error {
+	collection := u.client.Database("Auth").Collection("User")
+
+	userObjectId, err := bson.ObjectIDFromHex(userId)
+	if err != nil {
+		return customerrors.ErrorUserNotFound
+	}
+
+	pageObjectId, err := bson.ObjectIDFromHex(pageId)
+	if err != nil {
+		return customerrors.ErrorPageNotFound
+	}
+
+	_, err = collection.UpdateOne(
+		u.ctx,
+		bson.M{"_id": userObjectId},
+		bson.M{"$pull": bson.M{"bookmarkedPageIds": pageObjectId}},
+	)
+
+	return err
+}
+
 func (u *UserRepository) DeleteUser(id string) error {
 	collection := u.client.Database("Auth").Collection("User")
 

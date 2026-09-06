@@ -238,6 +238,34 @@ func (p *PageRepository) GetPublicPageBySlug(slug string) (*mongomodels.PageMong
 	return &page, nil
 }
 
+// GetPageByIdUnscoped fetches a page by id with no ownership filtering at
+// all — unlike GetPageById, the caller isn't asserting a specific owner, it's
+// asserting some other rule of its own (e.g. bookmarking needs to check both
+// that the page is public AND that the requester ISN'T the owner, which
+// doesn't fit an owner-scoped lookup either way).
+func (p *PageRepository) GetPageByIdUnscoped(id string) (*mongomodels.PageMongo, error) {
+	objectId, err := bson.ObjectIDFromHex(id)
+
+	if err != nil {
+		return nil, customerrors.ErrorPageNotFound
+	}
+
+	var page mongomodels.PageMongo
+	err = p.collection().FindOne(p.ctx, bson.M{
+		"_id":       objectId,
+		"deletedAt": bson.M{"$exists": false},
+	}).Decode(&page)
+
+	if err != nil {
+		if errors.Is(err, mongo.ErrNoDocuments) {
+			return nil, customerrors.ErrorPageNotFound
+		}
+		return nil, err
+	}
+
+	return &page, nil
+}
+
 type PublicPageSummary struct {
 	Title     string        `bson:"title"`
 	Icon      *string       `bson:"icon,omitempty"`
@@ -259,6 +287,51 @@ func (p *PageRepository) ListPublicPages(limit int64) ([]PublicPageSummary, erro
 		}}},
 		{{Key: "$sort", Value: bson.M{"updatedAt": -1}}},
 		{{Key: "$limit", Value: limit}},
+		{{Key: "$lookup", Value: bson.M{
+			"from":         "Block",
+			"localField":   "_id",
+			"foreignField": "pageId",
+			"as":           "blocks",
+		}}},
+		{{Key: "$project", Value: bson.M{
+			"title":     1,
+			"icon":      1,
+			"slug":      1,
+			"updatedAt": 1,
+			"linkCount": bson.M{"$size": "$blocks"},
+		}}},
+	}
+
+	cursor, err := p.collection().Aggregate(p.ctx, pipeline)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var summaries []PublicPageSummary
+
+	if err := cursor.All(p.ctx, &summaries); err != nil {
+		return nil, err
+	}
+
+	return summaries, nil
+}
+
+// GetPageSummariesByIds fetches lightweight public-page summaries for a
+// specific set of page ids — used for the bookmarks list. A bookmarked page
+// that's since been unpublished, deleted, or made private again is silently
+// excluded rather than erroring the whole request.
+func (p *PageRepository) GetPageSummariesByIds(ids []bson.ObjectID) ([]PublicPageSummary, error) {
+	if len(ids) == 0 {
+		return []PublicPageSummary{}, nil
+	}
+
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"_id":        bson.M{"$in": ids},
+			"visibility": "public",
+			"deletedAt":  bson.M{"$exists": false},
+		}}},
 		{{Key: "$lookup", Value: bson.M{
 			"from":         "Block",
 			"localField":   "_id",
