@@ -12,46 +12,41 @@ import (
 
 func AuthMiddleWare(jwtservice *jwtservice.JWTService) gin.HandlerFunc {
 	return func(ctx *gin.Context) {
-		accessToken, err := ctx.Cookie("access_token")
+		accessToken, accessCookieErr := ctx.Cookie("access_token")
 
-		if err != nil {
-			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"message": "authentication required",
-			})
-			return
-		}
+		if accessCookieErr == nil {
+			token, err := jwtservice.ValidateAccessToken(accessToken)
 
-		token, err := jwtservice.ValidateAccessToken(accessToken)
+			if err == nil {
+				claims, ok := token.Claims.(jwt.MapClaims)
 
-		if err == nil {
-			claims, ok := token.Claims.(jwt.MapClaims)
+				if !ok {
+					ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+						"message": "invalid access token",
+					})
+					return
+				}
 
-			if !ok {
+				userId, ok := claims["sub"].(string)
+
+				if !ok {
+					ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
+						"message": "invalid access token",
+					})
+					return
+				}
+
+				ctx.Set("userId", userId)
+				ctx.Next()
+				return
+			}
+
+			if !errors.Is(err, jwt.ErrTokenExpired) {
 				ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
 					"message": "invalid access token",
 				})
 				return
 			}
-
-			userId, ok := claims["sub"].(string)
-
-			if !ok {
-				ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-					"message": "invalid access token",
-				})
-				return
-			}
-
-			ctx.Set("userId", userId)
-			ctx.Next()
-			return
-		}
-
-		if !errors.Is(err, jwt.ErrTokenExpired) {
-			ctx.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{
-				"message": "invalid access token",
-			})
-			return
 		}
 
 		refreshToken, err := ctx.Cookie("refresh_token")
