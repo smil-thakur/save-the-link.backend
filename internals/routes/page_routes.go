@@ -13,11 +13,13 @@ func PageRoutes(r gin.IRoutes, pageController *pagecontroller.PageController) {
 	r.DELETE("/pages/:id", pageController.DeletePage)
 	r.POST("/pages/:id/publish", pageController.PublishPage)
 	r.POST("/pages/:id/unpublish", pageController.UnpublishPage)
+	r.PATCH("/pages/:id/collaborators", pageController.SetCollaborators)
 	r.GET("/trash", pageController.ListTrash)
 	r.POST("/pages/:id/restore", pageController.RestorePage)
 	r.DELETE("/pages/:id/permanent", pageController.PermanentlyDeletePage)
 }
 
 func PublicPageRoutes(r gin.IRoutes, pageController *pagecontroller.PageController) {
+	r.GET("/public/pages", pageController.ListPublicPages)
 	r.GET("/public/pages/:slug", pageController.GetPublicPage)
 }

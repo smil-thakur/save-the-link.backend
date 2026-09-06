@@ -39,7 +39,7 @@ func main() {
 	pageRepository := repository.NewPageRepository(client, context.Background())
 	blockRepository := repository.NewBlockRepository(client, context.Background(), pageRepository)
 
-	pageService := pageservice.NewPageService(pageRepository, blockRepository)
+	pageService := pageservice.NewPageService(pageRepository, blockRepository, userRepository)
 	pageController := pagecontroller.NewPageController(pageService)
 
 	blockService := blockservice.NewBlockService(blockRepository)
@@ -74,6 +74,7 @@ func main() {
 
 	r.GET("/me", middleware.AuthMiddleWare(jwtService), authController.Me)
 	r.DELETE("/me", middleware.AuthMiddleWare(jwtService), authController.DeleteAccount)
+	r.GET("/users/search", middleware.AuthMiddleWare(jwtService), authController.SearchUsers)
 
 	routes.PublicPageRoutes(r, pageController)
 	routes.PublicBlockRoutes(r, blockController)

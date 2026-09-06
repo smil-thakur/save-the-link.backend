@@ -199,8 +199,20 @@ func (p *PageRepository) GetPageForCollaborator(id string, requesterId string) (
 		return &page, nil
 	}
 
-	if page.Visibility == "public" && page.Collaboration == "edit" {
+	if page.Visibility != "public" {
+		return nil, customerrors.ErrorForbidden
+	}
+
+	if page.Collaboration == "edit" {
 		return &page, nil
+	}
+
+	if page.Collaboration == "invite" && err == nil {
+		for _, collaboratorId := range page.CollaboratorIds {
+			if collaboratorId == requesterObjectId {
+				return &page, nil
+			}
+		}
 	}
 
 	return nil, customerrors.ErrorForbidden
@@ -224,6 +236,57 @@ func (p *PageRepository) GetPublicPageBySlug(slug string) (*mongomodels.PageMong
 	}
 
 	return &page, nil
+}
+
+type PublicPageSummary struct {
+	Title     string        `bson:"title"`
+	Icon      *string       `bson:"icon,omitempty"`
+	Slug      string        `bson:"slug"`
+	LinkCount int           `bson:"linkCount"`
+	UpdatedAt time.Time     `bson:"updatedAt"`
+	Id        bson.ObjectID `bson:"_id"`
+}
+
+// ListPublicPages lists recently-updated public pages across every user, for
+// the "explore" preview shown to logged-out visitors. No ownership scoping —
+// these pages are, by definition, already publicly viewable via their slug.
+func (p *PageRepository) ListPublicPages(limit int64) ([]PublicPageSummary, error) {
+	pipeline := mongo.Pipeline{
+		{{Key: "$match", Value: bson.M{
+			"visibility": "public",
+			"deletedAt":  bson.M{"$exists": false},
+			"slug":       bson.M{"$exists": true},
+		}}},
+		{{Key: "$sort", Value: bson.M{"updatedAt": -1}}},
+		{{Key: "$limit", Value: limit}},
+		{{Key: "$lookup", Value: bson.M{
+			"from":         "Block",
+			"localField":   "_id",
+			"foreignField": "pageId",
+			"as":           "blocks",
+		}}},
+		{{Key: "$project", Value: bson.M{
+			"title":     1,
+			"icon":      1,
+			"slug":      1,
+			"updatedAt": 1,
+			"linkCount": bson.M{"$size": "$blocks"},
+		}}},
+	}
+
+	cursor, err := p.collection().Aggregate(p.ctx, pipeline)
+
+	if err != nil {
+		return nil, err
+	}
+
+	var summaries []PublicPageSummary
+
+	if err := cursor.All(p.ctx, &summaries); err != nil {
+		return nil, err
+	}
+
+	return summaries, nil
 }
 
 func (p *PageRepository) UpdatePage(id string, ownerId string, updates bson.M) (*mongomodels.PageMongo, error) {

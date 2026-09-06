@@ -39,18 +39,19 @@ func ToPageResponseDTO(page mongomodels.PageMongo) dto.PageResponseDTO {
 	}
 
 	return dto.PageResponseDTO{
-		Id:            page.Id.Hex(),
-		ParentPageId:  parentPageId,
-		Title:         page.Title,
-		Icon:          page.Icon,
-		Layout:        page.Layout,
-		Visibility:    page.Visibility,
-		Collaboration: page.Collaboration,
-		Slug:          page.Slug,
-		Order:         page.Order,
-		CreatedAt:     page.CreatedAt.Format(time.RFC3339),
-		UpdatedAt:     page.UpdatedAt.Format(time.RFC3339),
-		DeletedAt:     deletedAt,
+		Id:                 page.Id.Hex(),
+		ParentPageId:       parentPageId,
+		Title:              page.Title,
+		Icon:               page.Icon,
+		Layout:             page.Layout,
+		Visibility:         page.Visibility,
+		Collaboration:      page.Collaboration,
+		Slug:               page.Slug,
+		CollaboratorEmails: page.CollaboratorEmails,
+		Order:              page.Order,
+		CreatedAt:          page.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:          page.UpdatedAt.Format(time.RFC3339),
+		DeletedAt:          deletedAt,
 	}
 }
 
@@ -200,7 +201,12 @@ func (c *PageController) GetPublicPage(ctx *gin.Context) {
 		return
 	}
 
-	ctx.JSON(http.StatusOK, ToPageResponseDTO(*page))
+	// The collaborator list is only for the owner's Share dialog — anyone with
+	// the link shouldn't be able to see who else was specifically invited.
+	response := ToPageResponseDTO(*page)
+	response.CollaboratorEmails = nil
+
+	ctx.JSON(http.StatusOK, response)
 }
 
 func (c *PageController) ListTrash(ctx *gin.Context) {
@@ -246,4 +252,50 @@ func (c *PageController) PermanentlyDeletePage(ctx *gin.Context) {
 	}
 
 	ctx.Status(http.StatusNoContent)
+}
+
+func (c *PageController) SetCollaborators(ctx *gin.Context) {
+	ownerId := ctx.MustGet("userId").(string)
+	id := ctx.Param("id")
+
+	var body dto.SetCollaboratorsDTO
+
+	if err := ctx.ShouldBindBodyWithJSON(&body); err != nil {
+		ctx.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+
+	page, notFound, err := c.pageService.SetCollaborators(id, ownerId, body.Emails)
+
+	if err != nil {
+		c.respondWithError(ctx, err)
+		return
+	}
+
+	ctx.JSON(http.StatusOK, dto.SetCollaboratorsResponseDTO{
+		Page:           ToPageResponseDTO(*page),
+		NotFoundEmails: notFound,
+	})
+}
+
+func (c *PageController) ListPublicPages(ctx *gin.Context) {
+	summaries, err := c.pageService.ListPublicPages(12)
+
+	if err != nil {
+		c.respondWithError(ctx, err)
+		return
+	}
+
+	response := make([]dto.PublicPageSummaryDTO, len(summaries))
+
+	for i, summary := range summaries {
+		response[i] = dto.PublicPageSummaryDTO{
+			Title:     summary.Title,
+			Icon:      summary.Icon,
+			Slug:      summary.Slug,
+			LinkCount: summary.LinkCount,
+		}
+	}
+
+	ctx.JSON(http.StatusOK, response)
 }

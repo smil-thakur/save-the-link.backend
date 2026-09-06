@@ -16,8 +16,15 @@ type PageMongo struct {
 	Visibility    string         `bson:"visibility" json:"visibility"`
 	Collaboration string         `bson:"collaboration" json:"collaboration"`
 	Slug          *string        `bson:"slug,omitempty" json:"slug,omitempty"`
-	Order         float64        `bson:"order" json:"order"`
-	DeletedAt     *time.Time     `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
-	CreatedAt     time.Time      `bson:"createdAt" json:"createdAt"`
-	UpdatedAt     time.Time      `bson:"updatedAt" json:"updatedAt"`
+	// CollaboratorIds/CollaboratorEmails are only consulted when Collaboration
+	// is "invite" — edit access restricted to these specific registered users,
+	// as opposed to "edit" (anyone with the link). Emails are a denormalized
+	// copy of the resolved users' emails, kept in sync by SetCollaborators, so
+	// the owner can see who's invited without an extra join on every read.
+	CollaboratorIds    []bson.ObjectID `bson:"collaboratorIds,omitempty" json:"collaboratorIds,omitempty"`
+	CollaboratorEmails []string        `bson:"collaboratorEmails,omitempty" json:"collaboratorEmails,omitempty"`
+	Order              float64         `bson:"order" json:"order"`
+	DeletedAt          *time.Time      `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
+	CreatedAt          time.Time       `bson:"createdAt" json:"createdAt"`
+	UpdatedAt          time.Time       `bson:"updatedAt" json:"updatedAt"`
 }

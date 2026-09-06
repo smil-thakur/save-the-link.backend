@@ -175,3 +175,28 @@ func (a *AuthController) LoginUser(ctx *gin.Context, email string, password stri
 	return resp
 
 }
+
+func (a *AuthController) SearchUsers(ctx *gin.Context) {
+	requesterId := ctx.MustGet("userId").(string)
+	query := ctx.Query("q")
+
+	users, err := a.authService.SearchUsers(query, requesterId)
+
+	if err != nil {
+		ctx.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{
+			"message": fmt.Sprintf("%v", err),
+		})
+		return
+	}
+
+	response := make([]dto.UserSummaryDTO, len(users))
+
+	for i, user := range users {
+		response[i] = dto.UserSummaryDTO{
+			Username: user.Username,
+			Email:    user.Email,
+		}
+	}
+
+	ctx.JSON(http.StatusOK, response)
+}

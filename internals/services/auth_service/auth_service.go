@@ -50,3 +50,14 @@ func (s *AuthService) LoginUser(email string, password string) (*mongomodels.Use
 func (s *AuthService) DeleteAccount(userId string) error {
 	return s.userRepository.DeleteUser(userId)
 }
+
+// SearchUsers powers the collaborator autocomplete — requires at least 2
+// characters so it can't be used to enumerate the whole user base one
+// keystroke at a time.
+func (s *AuthService) SearchUsers(query string, requesterId string) ([]mongomodels.UserMongo, error) {
+	if len(query) < 2 {
+		return []mongomodels.UserMongo{}, nil
+	}
+
+	return s.userRepository.SearchUsersByEmail(query, requesterId, 6)
+}

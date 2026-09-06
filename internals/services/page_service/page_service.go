@@ -3,6 +3,7 @@ package pageservice
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"errors"
 	"slices"
 	"strings"
 
@@ -16,12 +17,14 @@ import (
 type PageService struct {
 	pageRepository  *repository.PageRepository
 	blockRepository *repository.BlockRepository
+	userRepository  *repository.UserRepository
 }
 
-func NewPageService(pageRepository *repository.PageRepository, blockRepository *repository.BlockRepository) *PageService {
+func NewPageService(pageRepository *repository.PageRepository, blockRepository *repository.BlockRepository, userRepository *repository.UserRepository) *PageService {
 	return &PageService{
 		pageRepository:  pageRepository,
 		blockRepository: blockRepository,
+		userRepository:  userRepository,
 	}
 }
 
@@ -121,7 +124,7 @@ func (s *PageService) DeleteAllPagesForOwner(ownerId string) error {
 }
 
 func (s *PageService) PublishPage(id string, ownerId string, body dto.PublishPageDTO) (*mongomodels.PageMongo, error) {
-	if body.Collaboration != "view" && body.Collaboration != "edit" {
+	if body.Collaboration != "view" && body.Collaboration != "edit" && body.Collaboration != "invite" {
 		return nil, customerrors.ErrorInvalidPage
 	}
 
@@ -161,6 +164,58 @@ func (s *PageService) UnpublishPage(id string, ownerId string) (*mongomodels.Pag
 
 func (s *PageService) GetPublicPage(slug string) (*mongomodels.PageMongo, error) {
 	return s.pageRepository.GetPublicPageBySlug(slug)
+}
+
+func (s *PageService) ListPublicPages(limit int64) ([]repository.PublicPageSummary, error) {
+	return s.pageRepository.ListPublicPages(limit)
+}
+
+// SetCollaborators resolves each email to a registered user (silently dropping
+// ones that don't match — the client's autocomplete should only ever submit
+// emails it found, but a free-typed unmatched email is reported back rather
+// than erroring the whole request) and stores the result as the page's
+// invite-only collaborator list.
+func (s *PageService) SetCollaborators(id string, ownerId string, emails []string) (*mongomodels.PageMongo, []string, error) {
+	ids := make([]bson.ObjectID, 0, len(emails))
+	resolvedEmails := make([]string, 0, len(emails))
+	var notFound []string
+
+	seen := make(map[string]bool)
+
+	for _, rawEmail := range emails {
+		email := strings.TrimSpace(strings.ToLower(rawEmail))
+
+		if email == "" || seen[email] {
+			continue
+		}
+		seen[email] = true
+
+		user, err := s.userRepository.FindUserByEmail(email)
+
+		if err != nil {
+			if errors.Is(err, customerrors.ErrorUserNotFound) {
+				notFound = append(notFound, rawEmail)
+				continue
+			}
+			return nil, nil, err
+		}
+
+		ids = append(ids, user.Id)
+		resolvedEmails = append(resolvedEmails, user.Email)
+	}
+
+	updates := bson.M{
+		"collaboratorIds":    ids,
+		"collaboratorEmails": resolvedEmails,
+	}
+
+	page, err := s.pageRepository.UpdatePage(id, ownerId, updates)
+
+	if err != nil {
+		return nil, nil, err
+	}
+
+	return page, notFound, nil
 }
 
 func generateSlug() (string, error) {
