@@ -24,6 +24,7 @@ type PageMongo struct {
 	CollaboratorIds    []bson.ObjectID `bson:"collaboratorIds,omitempty" json:"collaboratorIds,omitempty"`
 	CollaboratorEmails []string        `bson:"collaboratorEmails,omitempty" json:"collaboratorEmails,omitempty"`
 	Order              float64         `bson:"order" json:"order"`
+	BlockOrderSequence float64         `bson:"blockOrderSequence,omitempty" json:"-"`
 	DeletedAt          *time.Time      `bson:"deletedAt,omitempty" json:"deletedAt,omitempty"`
 	CreatedAt          time.Time       `bson:"createdAt" json:"createdAt"`
 	UpdatedAt          time.Time       `bson:"updatedAt" json:"updatedAt"`

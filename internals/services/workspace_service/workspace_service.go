@@ -87,10 +87,16 @@ func (s *WorkspaceService) Import(ownerId string, archive dto.WorkspaceArchiveDT
 			id := pageIds[*source.ParentSourceID]
 			parentID = &id
 		}
+		blockOrderSequence := 0.0
+		for _, sourceBlock := range source.Blocks {
+			if sourceBlock.Order < blockOrderSequence {
+				blockOrderSequence = sourceBlock.Order
+			}
+		}
 		pages[i] = mongomodels.PageMongo{
 			Id: createdPageIds[i], OwnerId: ownerObjectId, ParentPageId: parentID,
 			Title: strings.TrimSpace(source.Title), Icon: source.Icon, Layout: source.Layout,
-			Visibility: "private", Collaboration: "none", Order: source.Order,
+			Visibility: "private", Collaboration: "none", Order: source.Order, BlockOrderSequence: blockOrderSequence,
 			CreatedAt: now, UpdatedAt: now,
 		}
 		for _, sourceBlock := range source.Blocks {

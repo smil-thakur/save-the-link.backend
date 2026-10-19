@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"math"
 	"regexp"
 	"time"
 
@@ -90,6 +91,53 @@ func (p *PageRepository) InsertImportedPages(pages []mongomodels.PageMongo) erro
 	}
 	_, err := p.collection().InsertMany(p.ctx, documents)
 	return err
+}
+
+func (p *PageRepository) ReserveBlockOrders(ctx context.Context, pageId bson.ObjectID, count int) (float64, error) {
+	if count <= 0 {
+		return 0, customerrors.ErrorInvalidBlock
+	}
+
+	var page mongomodels.PageMongo
+	err := p.collection().FindOneAndUpdate(
+		ctx,
+		bson.M{
+			"_id": pageId,
+			"$or": bson.A{
+				bson.M{"blockOrderSequence": bson.M{"$exists": false}},
+				bson.M{"blockOrderSequence": bson.M{"$type": "number", "$gt": -math.MaxFloat64 + float64(count), "$lte": 0}},
+			},
+		},
+		bson.M{"$inc": bson.M{"blockOrderSequence": -count}},
+		options.FindOneAndUpdate().SetReturnDocument(options.After).SetProjection(bson.M{"blockOrderSequence": 1}),
+	).Decode(&page)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return 0, customerrors.ErrorInvalidBlock
+	}
+	if err != nil {
+		return 0, err
+	}
+	if math.IsNaN(page.BlockOrderSequence) || math.IsInf(page.BlockOrderSequence, 0) {
+		return 0, customerrors.ErrorInvalidBlock
+	}
+	return page.BlockOrderSequence, nil
+}
+
+func (p *PageRepository) SynchronizeBlockOrderSequence(ctx context.Context, pageId bson.ObjectID, order float64) error {
+	if math.IsNaN(order) || math.IsInf(order, 0) {
+		return customerrors.ErrorInvalidBlock
+	}
+	if order > 0 {
+		order = 0
+	}
+	result, err := p.collection().UpdateOne(ctx, bson.M{"_id": pageId}, bson.M{"$min": bson.M{"blockOrderSequence": order}})
+	if err != nil {
+		return err
+	}
+	if result.MatchedCount == 0 {
+		return customerrors.ErrorPageNotFound
+	}
+	return nil
 }
 
 func (p *PageRepository) DeletePagesByIds(ids []bson.ObjectID) error {

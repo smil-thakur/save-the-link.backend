@@ -3,6 +3,7 @@ package blockservice
 import (
 	"context"
 	"errors"
+	"math"
 	"net"
 	"net/url"
 	"strings"
@@ -65,7 +66,11 @@ func (s *BlockService) CreateBlock(ctx context.Context, pageId string, ownerId s
 	}
 
 	block := s.blockFromURL(ctx, blockURL)
-	return s.blockRepository.CreateBlock(pageId, ownerId, block)
+	page, err := s.blockRepository.AuthorizePageForEdit(pageId, ownerId)
+	if err != nil {
+		return nil, err
+	}
+	return s.blockRepository.CreateBlockForAuthorizedPageContext(ctx, page.Id, block)
 }
 
 func (s *BlockService) blockFromURL(ctx context.Context, blockURL string) *mongomodels.BlockMongo {
@@ -181,16 +186,31 @@ func (s *BlockService) ImportURLs(ctx context.Context, pageId string, requesterI
 		return nil, err
 	}
 
+	creatable := 0
+	for _, candidate := range candidates {
+		if outcomes[candidate.index].issue == nil {
+			creatable++
+		}
+	}
+	nextOrder := 0.0
+	if creatable > 0 {
+		nextOrder, err = s.blockRepository.ReserveBlockOrdersForAuthorizedPageContext(workCtx, page.Id, creatable)
+		if err != nil {
+			return nil, err
+		}
+	}
 	for _, candidate := range candidates {
 		outcome := &outcomes[candidate.index]
 		if outcome.issue != nil {
 			continue
 		}
+		order := nextOrder
+		nextOrder++
 		if err := workCtx.Err(); err != nil {
 			outcome.issue = &ImportIssue{Index: candidate.index, URL: candidate.url, Code: "request_canceled", Message: "link import was canceled"}
 			continue
 		}
-		block, err := s.blockRepository.CreateBlockForAuthorizedPageContext(workCtx, page.Id, outcome.block)
+		block, err := s.blockRepository.CreateBlockForAuthorizedPageAtOrderContext(workCtx, page.Id, outcome.block, order)
 		if err != nil {
 			outcome.block = nil
 			outcome.issue = &ImportIssue{Index: candidate.index, URL: candidate.url, Code: "create_failed", Message: "link could not be saved"}
@@ -285,6 +305,9 @@ func (s *BlockService) UpdateBlock(blockId string, ownerId string, body dto.Upda
 	}
 
 	if body.Order != nil {
+		if math.IsNaN(*body.Order) || math.IsInf(*body.Order, 0) {
+			return nil, customerrors.ErrorInvalidBlock
+		}
 		updates["order"] = *body.Order
 	}
 

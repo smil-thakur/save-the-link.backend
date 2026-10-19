@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"math"
 	"regexp"
 	"time"
 
@@ -54,9 +55,27 @@ func (b *BlockRepository) CreateBlockForAuthorizedPage(pageId bson.ObjectID, blo
 }
 
 func (b *BlockRepository) CreateBlockForAuthorizedPageContext(ctx context.Context, pageId bson.ObjectID, block *mongomodels.BlockMongo) (*mongomodels.BlockMongo, error) {
+	order, err := b.pageRepository.ReserveBlockOrders(ctx, pageId, 1)
+	if err != nil {
+		return nil, err
+	}
+
+	return b.CreateBlockForAuthorizedPageAtOrderContext(ctx, pageId, block, order)
+}
+
+func (b *BlockRepository) ReserveBlockOrdersForAuthorizedPageContext(ctx context.Context, pageId bson.ObjectID, count int) (float64, error) {
+	return b.pageRepository.ReserveBlockOrders(ctx, pageId, count)
+}
+
+// CreateBlockForAuthorizedPageAtOrderContext inserts at a caller-computed order.
+// Callers must have authorized the requester and derived the order in the same operation.
+func (b *BlockRepository) CreateBlockForAuthorizedPageAtOrderContext(ctx context.Context, pageId bson.ObjectID, block *mongomodels.BlockMongo, order float64) (*mongomodels.BlockMongo, error) {
+	if math.IsNaN(order) || math.IsInf(order, 0) {
+		return nil, customerrors.ErrorInvalidBlock
+	}
 	now := time.Now()
 	block.PageId = pageId
-	block.Order = float64(now.UnixNano())
+	block.Order = order
 	block.CreatedAt = now
 	block.UpdatedAt = now
 
@@ -111,7 +130,7 @@ func (b *BlockRepository) getBlocksByPageId(pageId string) ([]mongomodels.BlockM
 	cursor, err := b.collection().Find(
 		b.ctx,
 		bson.M{"pageId": pageObjectId},
-		options.Find().SetSort(bson.M{"order": 1}),
+		options.Find().SetSort(bson.D{{Key: "order", Value: 1}, {Key: "_id", Value: 1}}),
 	)
 
 	if err != nil {
@@ -156,6 +175,15 @@ func (b *BlockRepository) UpdateBlock(blockId string, ownerId string, updates bs
 
 	if err != nil {
 		return nil, err
+	}
+	if orderValue, exists := updates["order"]; exists {
+		order, ok := orderValue.(float64)
+		if !ok || math.IsNaN(order) || math.IsInf(order, 0) {
+			return nil, customerrors.ErrorInvalidBlock
+		}
+		if err := b.pageRepository.SynchronizeBlockOrderSequence(b.ctx, block.PageId, order); err != nil {
+			return nil, err
+		}
 	}
 
 	updates["updatedAt"] = time.Now()

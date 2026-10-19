@@ -93,10 +93,13 @@ func TestWorkspaceImportPrevalidationAndRoundTrip(t *testing.T) {
 	archive := dto.WorkspaceArchiveDTO{Version: 1, Pages: []dto.WorkspacePageDTO{
 		{
 			SourceID: "child", ParentSourceID: &rootSourceID, Title: "Child", Icon: &icon, Layout: "freeform", Order: 20,
-			Blocks: []dto.WorkspaceBlockDTO{{
-				URL: "https://example.com", Title: "Example", Description: richDescription,
-				CoverImage: "cover", Favicon: "icon", SiteName: "site", FetchStatus: "ok", Tags: []string{"tag"}, Order: 7,
-			}},
+			Blocks: []dto.WorkspaceBlockDTO{
+				{
+					URL: "https://example.com", Title: "Example", Description: richDescription,
+					CoverImage: "cover", Favicon: "icon", SiteName: "site", FetchStatus: "ok", Tags: []string{"tag"}, Order: 1e18,
+				},
+				{URL: "https://lower.example", Title: "Lower", FetchStatus: "failed", Tags: []string{}, Order: -10},
+			},
 		},
 		{SourceID: rootSourceID, Title: "Root", Layout: "grid", Order: 10, Blocks: []dto.WorkspaceBlockDTO{}},
 	}}
@@ -124,20 +127,27 @@ func TestWorkspaceImportPrevalidationAndRoundTrip(t *testing.T) {
 		t.Fatalf("hierarchy was not preserved")
 	}
 	blocks, err := blockRepository.GetBlocksByPageId(byTitle["Child"].Id.Hex())
-	if err != nil || len(blocks) != 1 {
-		t.Fatalf("expected imported block, got %d err=%v", len(blocks), err)
+	if err != nil || len(blocks) != 2 {
+		t.Fatalf("expected two imported blocks, got %d err=%v", len(blocks), err)
 	}
-	if blocks[0].Title != "Example" || blocks[0].Order != 7 || blocks[0].FetchStatus != "ok" || len(blocks[0].Tags) != 1 {
-		t.Fatalf("block metadata/order was not preserved: %+v", blocks[0])
+	if blocks[0].Title != "Lower" || blocks[0].Order != -10 || blocks[1].Title != "Example" || blocks[1].Order != 1e18 || blocks[1].FetchStatus != "ok" || len(blocks[1].Tags) != 1 {
+		t.Fatalf("block metadata/order was not preserved: %+v", blocks)
+	}
+	createdAfterImport, err := blockRepository.CreateBlockForAuthorizedPage(byTitle["Child"].Id, &mongomodels.BlockMongo{URL: "https://new.example", Title: "New", FetchStatus: "ok"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createdAfterImport.Order != -11 || !(createdAfterImport.Order < blocks[0].Order) {
+		t.Fatalf("new block order = %g, want -11 before imported order %g", createdAfterImport.Order, blocks[0].Order)
 	}
 	for _, allowed := range []string{"<p>", "<strong>bold</strong>", "<em>emphasis</em>", "<br>", `<a href="https://example.com" target="_blank" rel="noopener">safe link</a>`, "<ul><li>item</li></ul>"} {
-		if !strings.Contains(blocks[0].Description, allowed) {
-			t.Fatalf("allowed formatting %q was not preserved: %s", allowed, blocks[0].Description)
+		if !strings.Contains(blocks[1].Description, allowed) {
+			t.Fatalf("allowed formatting %q was not preserved: %s", allowed, blocks[1].Description)
 		}
 	}
 	for _, unsafe := range []string{"<script", "onclick", "javascript:"} {
-		if strings.Contains(strings.ToLower(blocks[0].Description), unsafe) {
-			t.Fatalf("unsafe markup %q remained: %s", unsafe, blocks[0].Description)
+		if strings.Contains(strings.ToLower(blocks[1].Description), unsafe) {
+			t.Fatalf("unsafe markup %q remained: %s", unsafe, blocks[1].Description)
 		}
 	}
 
@@ -154,12 +164,16 @@ func TestWorkspaceImportPrevalidationAndRoundTrip(t *testing.T) {
 	}
 	var exportedDescription string
 	for _, page := range exported.Pages {
-		if page.Title == "Child" && len(page.Blocks) == 1 {
-			exportedDescription = page.Blocks[0].Description
+		if page.Title == "Child" && len(page.Blocks) == 3 {
+			for _, block := range page.Blocks {
+				if block.Title == "Example" {
+					exportedDescription = block.Description
+				}
+			}
 		}
 	}
-	if exportedDescription != blocks[0].Description {
-		t.Fatalf("export changed sanitized rich-text formatting: got %q want %q", exportedDescription, blocks[0].Description)
+	if exportedDescription != blocks[1].Description {
+		t.Fatalf("export changed sanitized rich-text formatting: got %q want %q", exportedDescription, blocks[1].Description)
 	}
 
 	failureURL := "https://rollback.example"

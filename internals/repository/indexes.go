@@ -47,10 +47,22 @@ func EnsureIndexes(ctx context.Context, client *mongo.Client) ([]error, error) {
 	}
 
 	_, err := database.Collection("Block").Indexes().CreateOne(ctx, mongo.IndexModel{
-		Keys:    bson.D{{Key: "pageId", Value: 1}, {Key: "order", Value: 1}},
-		Options: options.Index().SetName("block_page_order"),
+		Keys:    bson.D{{Key: "pageId", Value: 1}, {Key: "order", Value: 1}, {Key: "_id", Value: 1}},
+		Options: options.Index().SetName("block_page_order_id"),
 	})
-	return warnings, err
+	if err != nil {
+		return warnings, err
+	}
+	err = database.Collection("Block").Indexes().DropOne(ctx, "block_page_order")
+	if err != nil && !isIndexNotFoundError(err) {
+		return warnings, err
+	}
+	return warnings, nil
+}
+
+func isIndexNotFoundError(err error) bool {
+	var serverError mongo.ServerError
+	return errors.As(err, &serverError) && serverError.HasErrorCode(27)
 }
 
 func historicalDuplicateEmailWarning(err error) error {

@@ -194,6 +194,16 @@ func TestBulkImportReturnsPartialResultsWithoutNetwork(t *testing.T) {
 	if fetchCount.Load() != 2 {
 		t.Fatalf("invalid and duplicate URLs must not fetch metadata; got %d calls", fetchCount.Load())
 	}
+	blocks, err := blockRepository.GetBlocksByPageId(page.Id.Hex())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(blocks) != 3 || blocks[0].URL != "https://new.example" || blocks[1].URL != "https://metadata-fails.example" || blocks[2].URL != "http://example.com" {
+		t.Fatalf("bulk-created links must all precede the old link: %+v", blocks)
+	}
+	if !(blocks[0].Order < blocks[1].Order && blocks[1].Order < blocks[2].Order) {
+		t.Fatalf("bulk-created link orders are not strict predecessors: %+v", blocks)
+	}
 }
 
 func TestBulkImportBoundsConcurrencyPreservesOrderAndHonorsCancellation(t *testing.T) {
